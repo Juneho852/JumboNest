@@ -344,6 +344,84 @@
             padding: 20px;
             color: #666;
         }
+
+        .image-preview-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .image-preview {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .remove-image-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .expense-image {
+            margin-top: 10px;
+            max-width: 100%;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .expense-image:hover {
+            transform: scale(1.02);
+        }
+
+        .image-thumbnail {
+            max-width: 150px;
+            max-height: 150px;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.9);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+        }
+
+        .close-modal {
+            position: absolute;
+            top: 20px;
+            right: 40px;
+            color: white;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close-modal:hover {
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -428,6 +506,12 @@
                     </div>
                     
                     <div class="form-group">
+                        <label>Upload Invoice/Receipt (Optional)</label>
+                        <input type="file" id="invoiceImage" accept="image/*" onchange="previewImage(event)">
+                        <div id="imagePreview" style="margin-top: 10px;"></div>
+                    </div>
+                    
+                    <div class="form-group">
                         <label>Notes (Optional)</label>
                         <textarea id="notes" placeholder="Add any additional details..."></textarea>
                     </div>
@@ -490,16 +574,59 @@
         </div>
     </div>
 
+    <!-- Image Modal -->
+    <div id="imageModal" class="modal" onclick="closeModal()">
+        <span class="close-modal">&times;</span>
+        <img class="modal-content" id="modalImage">
+    </div>
+
     <script>
         let expenses = [];
         let editingId = null;
+        let currentImageData = null;
+
+        // Preview image before upload
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    currentImageData = e.target.result;
+                    const preview = document.getElementById('imagePreview');
+                    preview.innerHTML = `
+                        <div class="image-preview-container">
+                            <img src="${e.target.result}" class="image-preview" alt="Invoice preview">
+                            <button type="button" class="remove-image-btn" onclick="removeImage()">×</button>
+                        </div>
+                    `;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function removeImage() {
+            currentImageData = null;
+            document.getElementById('invoiceImage').value = '';
+            document.getElementById('imagePreview').innerHTML = '';
+        }
+
+        function viewImage(imageData) {
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImage');
+            modal.style.display = 'flex';
+            modalImg.src = imageData;
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+        }
 
         // Load expenses from storage on page load
         async function loadExpenses() {
             try {
-                const stored = localStorage.getItem('jumbonest-expenses');
-                if (stored) {
-                    expenses = JSON.parse(stored);
+                const result = await window.storage.get('jumbonest-expenses');
+                if (result && result.value) {
+                    expenses = JSON.parse(result.value);
                     updateUI();
                 }
             } catch (error) {
@@ -511,7 +638,7 @@
         // Save expenses to storage
         async function saveExpenses() {
             try {
-                localStorage.setItem('jumbonest-expenses', JSON.stringify(expenses));
+                await window.storage.set('jumbonest-expenses', JSON.stringify(expenses));
             } catch (error) {
                 console.error('Error saving expenses:', error);
                 alert('Error saving data. Please try again.');
@@ -534,6 +661,7 @@
                 paymentMethod: document.getElementById('paymentMethod').value,
                 contributor: document.getElementById('contributor').value,
                 notes: document.getElementById('notes').value,
+                imageData: currentImageData,
                 createdAt: editingId ? expenses.find(e => e.id === editingId).createdAt : new Date().toISOString()
             };
 
@@ -549,6 +677,8 @@
             await saveExpenses();
             this.reset();
             document.getElementById('date').valueAsDate = new Date();
+            currentImageData = null;
+            document.getElementById('imagePreview').innerHTML = '';
             updateUI();
         });
 
@@ -686,6 +816,11 @@
                             <div class="expense-amount">HK$ ${expense.amount.toLocaleString('en-HK', {minimumFractionDigits: 2})}</div>
                         </div>
                         ${expense.notes ? `<div class="expense-notes">"${expense.notes}"</div>` : ''}
+                        ${expense.imageData ? `
+                            <div style="margin-top: 10px;">
+                                <img src="${expense.imageData}" class="image-thumbnail" alt="Invoice" onclick="viewImage('${expense.imageData}')" title="Click to view full size">
+                            </div>
+                        ` : ''}
                         <div class="expense-actions">
                             <button class="btn-small btn-edit" onclick="editExpense(${expense.id})">✏️ Edit</button>
                             <button class="btn-small btn-delete" onclick="deleteExpense(${expense.id})">🗑️ Delete</button>
@@ -723,6 +858,18 @@
             document.getElementById('paymentMethod').value = expense.paymentMethod;
             document.getElementById('contributor').value = expense.contributor || '';
             document.getElementById('notes').value = expense.notes;
+            
+            // Handle image
+            currentImageData = expense.imageData || null;
+            if (expense.imageData) {
+                document.getElementById('imagePreview').innerHTML = `
+                    <div class="image-preview-container">
+                        <img src="${expense.imageData}" class="image-preview" alt="Invoice preview">
+                        <button type="button" class="remove-image-btn" onclick="removeImage()">×</button>
+                    </div>
+                `;
+            }
+            
             document.getElementById('submitBtn').textContent = 'Update Expense';
             
             window.scrollTo({ top: 0, behavior: 'smooth' });
