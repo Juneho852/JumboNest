@@ -429,6 +429,12 @@
         <div class="header">
             <h1>🏢 JumboNest Expense Tracker</h1>
             <p class="subtitle">Track and manage all JumboNest expenses | June Ho & Manson Ching (40% each) | Bob Chan (20%)</p>
+            <div style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; font-size: 12px;">
+                <strong>Storage Status:</strong> 
+                <span id="storageStatus">Checking...</span> | 
+                <button onclick="testStorage()" style="padding: 5px 10px; margin-left: 10px; cursor: pointer; border-radius: 5px; border: 1px solid #667eea; background: white;">Test Storage</button>
+                <button onclick="viewStoredData()" style="padding: 5px 10px; margin-left: 5px; cursor: pointer; border-radius: 5px; border: 1px solid #667eea; background: white;">View Stored Data</button>
+            </div>
         </div>
 
         <div class="dashboard">
@@ -572,6 +578,14 @@
                 </div>
             </div>
         </div>
+
+        <!-- Recent 5 Transactions Quick View -->
+        <div class="card" style="margin-top: 30px;">
+            <h2 class="card-title">⚡ Recent 5 Transactions</h2>
+            <div id="recentTransactions">
+                <div class="loading">No recent transactions yet</div>
+            </div>
+        </div>
     </div>
 
     <!-- Image Modal -->
@@ -641,15 +655,18 @@
         // Save expenses to storage
         function saveExpenses() {
             try {
-                localStorage.setItem('jumbonest-expenses', JSON.stringify(expenses));
-                console.log('Successfully saved', expenses.length, 'expenses');
+                const dataToSave = JSON.stringify(expenses);
+                localStorage.setItem('jumbonest-expenses', dataToSave);
+                console.log('✅ Successfully saved', expenses.length, 'expenses');
+                console.log('Data size:', (dataToSave.length / 1024).toFixed(2), 'KB');
+                updateStorageStatus();
                 return true;
             } catch (error) {
-                console.error('Error saving expenses:', error);
+                console.error('❌ Error saving expenses:', error);
                 if (error.name === 'QuotaExceededError') {
                     alert('Storage is full! Please export your data and clear old expenses.');
                 } else {
-                    alert('Error saving data. Please try again.');
+                    alert('Error saving data: ' + error.message);
                 }
                 return false;
             }
@@ -661,6 +678,9 @@
         // Handle form submission
         document.getElementById('expenseForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            
+            console.log('=== Form Submission Started ===');
+            console.log('Current expenses count:', expenses.length);
             
             const expense = {
                 id: editingId || Date.now(),
@@ -675,25 +695,36 @@
                 createdAt: editingId ? expenses.find(e => e.id === editingId).createdAt : new Date().toISOString()
             };
 
+            console.log('New expense:', expense);
+
             if (editingId) {
                 const index = expenses.findIndex(e => e.id === editingId);
                 expenses[index] = expense;
                 editingId = null;
                 document.getElementById('submitBtn').textContent = 'Add Expense';
+                console.log('Updated existing expense at index:', index);
             } else {
                 expenses.push(expense);
+                console.log('Added new expense. Total count now:', expenses.length);
             }
 
             // Save immediately
+            console.log('Calling saveExpenses...');
             const saved = saveExpenses();
+            console.log('Save result:', saved);
             
             if (saved) {
+                console.log('Save successful! Updating UI...');
+                
                 // Only reset form if save was successful
                 this.reset();
                 document.getElementById('date').valueAsDate = new Date();
                 currentImageData = null;
                 document.getElementById('imagePreview').innerHTML = '';
+                
+                // Update UI
                 updateUI();
+                console.log('UI updated. Category breakdown and contributor breakdown should now show updated data.');
                 
                 // Show success message
                 const btn = document.getElementById('submitBtn');
@@ -704,7 +735,11 @@
                     btn.textContent = originalText;
                     btn.style.background = '';
                 }, 2000);
+            } else {
+                console.error('Save failed!');
             }
+            
+            console.log('=== Form Submission Complete ===');
         });
 
         function updateUI() {
@@ -712,6 +747,7 @@
             updateCategoryBreakdown();
             updateContributorBreakdown();
             updateExpenseList();
+            updateRecentTransactions();
         }
 
         function updateStats() {
@@ -730,6 +766,8 @@
         }
 
         function updateCategoryBreakdown() {
+            console.log('Updating category breakdown. Total expenses:', expenses.length);
+            
             const breakdown = {};
             const total = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -737,10 +775,14 @@
                 breakdown[exp.category] = (breakdown[exp.category] || 0) + exp.amount;
             });
 
+            console.log('Category breakdown:', breakdown);
+            console.log('Total amount:', total);
+
             const container = document.getElementById('categoryBreakdown');
             
             if (Object.keys(breakdown).length === 0) {
                 container.innerHTML = '<div class="loading">Add expenses to see breakdown...</div>';
+                console.log('No categories to display');
                 return;
             }
 
@@ -760,6 +802,8 @@
                         </div>
                     `;
                 }).join('');
+            
+            console.log('Category breakdown updated in DOM');
         }
 
         function updateContributorBreakdown() {
@@ -771,6 +815,12 @@
                 'Bob Chan': 20
             };
 
+            // Initialize all contributors with 0
+            Object.keys(shareholding).forEach(name => {
+                breakdown[name] = 0;
+            });
+
+            // Add actual expenses
             expenses.forEach(exp => {
                 if (exp.contributor) {
                     breakdown[exp.contributor] = (breakdown[exp.contributor] || 0) + exp.amount;
@@ -779,11 +829,6 @@
 
             const container = document.getElementById('contributorBreakdown');
             
-            if (Object.keys(breakdown).length === 0) {
-                container.innerHTML = '<div class="loading">Add expenses to see breakdown...</div>';
-                return;
-            }
-
             container.innerHTML = Object.entries(breakdown)
                 .sort((a, b) => b[1] - a[1])
                 .map(([contributor, amount]) => {
@@ -791,15 +836,29 @@
                     const share = shareholding[contributor] || 0;
                     const expectedShare = total * (share / 100);
                     const difference = amount - expectedShare;
-                    const balanceColor = difference > 0 ? '#f44336' : '#4CAF50';
-                    const balanceText = difference > 0 ? 'overpaid' : 'underpaid';
+                    
+                    let balanceColor = '#999';
+                    let balanceText = 'no contribution yet';
+                    
+                    if (amount > 0) {
+                        balanceColor = difference > 0 ? '#f44336' : difference < 0 ? '#4CAF50' : '#999';
+                        if (Math.abs(difference) < 1) {
+                            balanceText = 'balanced ✓';
+                            balanceColor = '#4CAF50';
+                        } else {
+                            balanceText = difference > 0 ? 'overpaid' : 'underpaid';
+                        }
+                    }
                     
                     return `
                         <div class="category-item">
                             <div style="flex: 1;">
                                 <div class="category-name">${contributor} (${share}% share)</div>
-                                <div style="font-size: 11px; color: ${balanceColor}; margin-top: 4px;">
-                                    ${Math.abs(difference).toLocaleString('en-HK', {minimumFractionDigits: 2})} ${balanceText}
+                                <div style="font-size: 11px; color: ${balanceColor}; margin-top: 4px; font-weight: 600;">
+                                    ${amount > 0 
+                                        ? `HK$ ${Math.abs(difference).toLocaleString('en-HK', {minimumFractionDigits: 2})} ${balanceText}`
+                                        : balanceText
+                                    }
                                 </div>
                                 <div class="category-bar">
                                     <div class="category-bar-fill" style="width: ${percentage}%"></div>
@@ -852,6 +911,39 @@
                         </div>
                     </div>
                 `).join('');
+        }
+
+        function updateRecentTransactions() {
+            const container = document.getElementById('recentTransactions');
+            const recent = expenses
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                .slice(0, 5);
+            
+            if (recent.length === 0) {
+                container.innerHTML = '<div class="loading">No recent transactions yet</div>';
+                return;
+            }
+
+            container.innerHTML = recent.map((expense, index) => `
+                <div class="expense-item" style="margin-bottom: 10px;">
+                    <div class="expense-header">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <div style="background: #667eea; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px;">
+                                ${index + 1}
+                            </div>
+                            <div>
+                                <div class="expense-title">${expense.title}</div>
+                                <div class="expense-meta">
+                                    <span class="expense-category">${expense.category}</span>
+                                    <span>📅 ${new Date(expense.date).toLocaleDateString('en-GB')}</span>
+                                    <span>👤 ${expense.contributor}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="expense-amount">HK$ ${expense.amount.toLocaleString('en-HK', {minimumFractionDigits: 2})}</div>
+                    </div>
+                </div>
+            `).join('');
         }
 
         function filterExpenses() {
@@ -945,8 +1037,55 @@
             URL.revokeObjectURL(url);
         }
 
+        // Test localStorage functionality
+        function testStorage() {
+            try {
+                const testKey = 'jumbonest-test';
+                const testValue = 'test-' + Date.now();
+                localStorage.setItem(testKey, testValue);
+                const retrieved = localStorage.getItem(testKey);
+                localStorage.removeItem(testKey);
+                
+                if (retrieved === testValue) {
+                    alert('✅ Storage is working! Your data should be saved properly.');
+                    updateStorageStatus();
+                } else {
+                    alert('❌ Storage test failed. Please check your browser settings.');
+                }
+            } catch (error) {
+                alert('❌ Storage error: ' + error.message);
+            }
+        }
+
+        function viewStoredData() {
+            const stored = localStorage.getItem('jumbonest-expenses');
+            if (stored) {
+                const data = JSON.parse(stored);
+                alert(`Found ${data.length} expenses in storage.\n\nFirst expense: ${data[0] ? data[0].title : 'none'}`);
+                console.log('Stored expenses:', data);
+            } else {
+                alert('No data found in storage.');
+            }
+        }
+
+        function updateStorageStatus() {
+            try {
+                const stored = localStorage.getItem('jumbonest-expenses');
+                const count = stored ? JSON.parse(stored).length : 0;
+                document.getElementById('storageStatus').textContent = `${count} expenses saved`;
+                document.getElementById('storageStatus').style.color = count > 0 ? '#4CAF50' : '#999';
+            } catch (error) {
+                document.getElementById('storageStatus').textContent = 'Error checking storage';
+                document.getElementById('storageStatus').style.color = '#f44336';
+            }
+        }
+
         // Load expenses when page loads
         loadExpenses();
+        updateStorageStatus();
+        
+        // Update storage status every 5 seconds
+        setInterval(updateStorageStatus, 5000);
     </script>
 </body>
 </html>
