@@ -622,26 +622,36 @@
         }
 
         // Load expenses from storage on page load
-        async function loadExpenses() {
+        function loadExpenses() {
             try {
-                const result = await window.storage.get('jumbonest-expenses');
-                if (result && result.value) {
-                    expenses = JSON.parse(result.value);
+                const stored = localStorage.getItem('jumbonest-expenses');
+                if (stored) {
+                    expenses = JSON.parse(stored);
+                    console.log('Loaded', expenses.length, 'expenses from storage');
                     updateUI();
+                } else {
+                    console.log('No saved expenses found, starting fresh');
                 }
             } catch (error) {
-                console.log('No existing expenses found, starting fresh');
+                console.error('Error loading expenses:', error);
                 expenses = [];
             }
         }
 
         // Save expenses to storage
-        async function saveExpenses() {
+        function saveExpenses() {
             try {
-                await window.storage.set('jumbonest-expenses', JSON.stringify(expenses));
+                localStorage.setItem('jumbonest-expenses', JSON.stringify(expenses));
+                console.log('Successfully saved', expenses.length, 'expenses');
+                return true;
             } catch (error) {
                 console.error('Error saving expenses:', error);
-                alert('Error saving data. Please try again.');
+                if (error.name === 'QuotaExceededError') {
+                    alert('Storage is full! Please export your data and clear old expenses.');
+                } else {
+                    alert('Error saving data. Please try again.');
+                }
+                return false;
             }
         }
 
@@ -649,7 +659,7 @@
         document.getElementById('date').valueAsDate = new Date();
 
         // Handle form submission
-        document.getElementById('expenseForm').addEventListener('submit', async function(e) {
+        document.getElementById('expenseForm').addEventListener('submit', function(e) {
             e.preventDefault();
             
             const expense = {
@@ -674,12 +684,27 @@
                 expenses.push(expense);
             }
 
-            await saveExpenses();
-            this.reset();
-            document.getElementById('date').valueAsDate = new Date();
-            currentImageData = null;
-            document.getElementById('imagePreview').innerHTML = '';
-            updateUI();
+            // Save immediately
+            const saved = saveExpenses();
+            
+            if (saved) {
+                // Only reset form if save was successful
+                this.reset();
+                document.getElementById('date').valueAsDate = new Date();
+                currentImageData = null;
+                document.getElementById('imagePreview').innerHTML = '';
+                updateUI();
+                
+                // Show success message
+                const btn = document.getElementById('submitBtn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Saved!';
+                btn.style.background = '#4CAF50';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 2000);
+            }
         });
 
         function updateUI() {
@@ -879,7 +904,7 @@
             if (!confirm('Are you sure you want to delete this expense?')) return;
             
             expenses = expenses.filter(e => e.id !== id);
-            await saveExpenses();
+            saveExpenses();
             updateUI();
         }
 
